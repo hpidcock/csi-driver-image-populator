@@ -9,16 +9,17 @@ RUN go install github.com/kubernetes-csi/csi-driver-image-populator/cmd/imagepop
 WORKDIR /root/
 RUN go get -u github.com/opencontainers/image-tools/cmd/oci-image-tool
 
-FROM centos:centos7
+FROM ubuntu:18.04
 LABEL maintainers="Kubernetes Authors"
 LABEL description="Image Driver"
 
 RUN \
-  yum install -y epel-release && \
-  yum install -y skopeo && \
-  yum clean all
+  sh -c "echo 'deb http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/xUbuntu_18.04/ /' > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list" && \
+  wget -nv "https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable/xUbuntu_18.04/Release.key" -O- | apt-key add - && \
+  apt-get update -qq && \
+  apt-get install --no-install-recommends --yes skopeo && \
+  rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /root/go/bin/oci-image-tool /usr/local/bin/oci-image-tool
 COPY --from=build /root/go/bin/imagepopulatorplugin /usr/local/bin/imagepopulatorplugin
 ENTRYPOINT ["/usr/local/bin/imagepopulatorplugin"]
-
