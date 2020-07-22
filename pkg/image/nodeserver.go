@@ -18,9 +18,12 @@ package image
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
+	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/context"
@@ -46,7 +49,11 @@ type nodeServer struct {
 	args     []string
 }
 
-func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+var driverMutex = sync.Mutex{}
+
+func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (outRes *csi.NodePublishVolumeResponse, outErr error) {
+	driverMutex.Lock()
+	defer driverMutex.Unlock()
 	// Check arguments
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability missing in request")
@@ -58,60 +65,132 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, status.Error(codes.InvalidArgument, "Target path missing in request")
 	}
 
-	targetPath := req.GetTargetPath()
-	if err := os.MkdirAll(targetPath, 0750); err != nil {
+	if err := os.MkdirAll("/var/run/imager2/blobs", 0750); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if err := os.MkdirAll("/var/run/imager2/images", 0750); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if err := os.MkdirAll("/var/run/imager2/volumes", 0750); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if err := os.MkdirAll("/var/run/imager2/rootfs", 0750); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	if err := os.MkdirAll("/var/run/imager/blobs", 0750); err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-	if err := os.MkdirAll("/var/run/imager/volumes", 0750); err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
+	cleanups := []func(){}
+	defer func() {
+		if outErr != nil {
+			for i := len(cleanups) - 1; i >= 0; i-- {
+				cleanups[i]()
+			}
+		}
+	}()
 
 	volumeID := req.GetVolumeId()
+
+	uid := strings.Split(strings.TrimPrefix(req.GetTargetPath(), "/var/lib/kubelet/pods/"), "/")[0]
+	podPath := fmt.Sprintf("/var/run/imager2/pods/%s", uid)
+	if err := os.MkdirAll(podPath, 0750); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	volumeMapPath := path.Join(podPath, volumeID)
+
+	volumeName := req.GetVolumeContext()["name"]
+	targetPath := path.Join(podPath, volumeName)
+
+	err := os.Symlink(targetPath, volumeMapPath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	cleanups = append(cleanups, func() {
+		os.RemoveAll(volumeMapPath)
+	})
 
 	image := req.GetVolumeContext()["image"]
 	imageURL := fmt.Sprintf("docker://%s", image)
 
-	// ref, err := reference.Parse(image)
-	// if err != nil {
-	// 	return nil, status.Error(codes.Internal, err.Error())
-	// }
-	// switch typedRef := ref.(type) {
-	// case reference.Digested:
-	// case reference.Tagged:
-	// }
-
-	ociImagePath := fmt.Sprintf("/var/run/imager/volumes/%s", volumeID)
+	ociImagePath := fmt.Sprintf("/var/run/imager2/images/%s", volumeID)
 	ociURL := fmt.Sprintf("oci:%s:img", ociImagePath)
 	args := []string{"copy",
-		"--src-shared-blob-dir", "/var/run/imager/blobs/",
-		"--dest-shared-blob-dir", "/var/run/imager/blobs/",
+		"--src-shared-blob-dir", "/var/run/imager2/blobs/",
+		"--dest-shared-blob-dir", "/var/run/imager2/blobs/",
 		imageURL, ociURL}
-	_, err := ns.runCmd("skopeo", args)
-	defer os.RemoveAll(ociImagePath)
+	_, err = ns.runCmd("skopeo", args)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	err = os.Symlink("/var/run/imager/blobs/sha256", path.Join(ociImagePath, "blobs/sha256"))
+	cleanups = append(cleanups, func() {
+		os.RemoveAll(ociImagePath)
+	})
+
+	err = os.Symlink("/var/run/imager2/blobs/sha256", path.Join(ociImagePath, "blobs/sha256"))
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	args = []string{"unpack",
-		"--ref", "name=img",
-		ociImagePath, targetPath}
-	_, err = ns.runCmd("oci-image-tool", args)
+	digestBytes, err := ns.runCmd("skopeo", []string{"manifest-digest", path.Join(ociImagePath, "index.json")})
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	digest := strings.TrimSpace(string(digestBytes))
+
+	createdRootfs := false
+	rootfsPath := fmt.Sprintf("/var/run/imager2/rootfs/%s", digest)
+	if _, err := os.Stat(rootfsPath); os.IsNotExist(err) {
+		args = []string{"unpack",
+			"--ref", "name=img",
+			ociImagePath, rootfsPath}
+		_, err = ns.runCmd("oci-image-tool", args)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+		createdRootfs = true
+		cleanups = append(cleanups, func() {
+			os.RemoveAll(rootfsPath)
+		})
+	} else if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	volumePath := path.Join("/var/run/imager2/volumes", digest)
+	if err := os.MkdirAll(volumePath, 0750); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if createdRootfs {
+		cleanups = append(cleanups, func() {
+			os.RemoveAll(volumePath)
+		})
+	}
+
+	volumeRegistrationPath := path.Join(volumePath, volumeID)
+	if f, err := os.Create(volumeRegistrationPath); err == nil {
+		f.Close()
+		cleanups = append(cleanups, func() {
+			os.RemoveAll(volumeRegistrationPath)
+		})
+	} else if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	err = os.RemoveAll(targetPath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	err = os.Symlink(rootfsPath, targetPath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	cleanups = append(cleanups, func() {
+		os.RemoveAll(targetPath)
+	})
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
 func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	driverMutex.Lock()
+	defer driverMutex.Unlock()
 	// Check arguments
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
@@ -119,9 +198,65 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	if req.GetTargetPath() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Target path missing in request")
 	}
-	targetPath := req.GetTargetPath()
 
-	err := os.RemoveAll(targetPath)
+	volumeID := req.GetVolumeId()
+
+	uid := strings.Split(strings.TrimPrefix(req.GetTargetPath(), "/var/lib/kubelet/pods/"), "/")[0]
+	podPath := fmt.Sprintf("/var/run/imager2/pods/%s", uid)
+	volumeMapPath := path.Join(podPath, volumeID)
+	targetPath, err := os.Readlink(volumeMapPath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	err = os.RemoveAll(targetPath)
+	if os.IsNotExist(err) {
+	} else if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	ociImagePath := fmt.Sprintf("/var/run/imager2/images/%s", volumeID)
+	digestBytes, err := ns.runCmd("skopeo", []string{"manifest-digest", path.Join(ociImagePath, "index.json")})
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	digest := strings.TrimSpace(string(digestBytes))
+
+	volumePath := path.Join("/var/run/imager2/volumes", digest)
+	volumeRegistrationPath := path.Join(volumePath, volumeID)
+	err = os.RemoveAll(volumeRegistrationPath)
+	if os.IsNotExist(err) {
+	} else if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	dirEnts, err := ioutil.ReadDir(volumePath)
+	if os.IsNotExist(err) {
+	} else if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	if len(dirEnts) == 0 {
+		err := os.RemoveAll(volumePath)
+		if os.IsNotExist(err) {
+		} else if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+
+		rootfsPath := fmt.Sprintf("/var/run/imager2/rootfs/%s", digest)
+		err = os.RemoveAll(rootfsPath)
+		if os.IsNotExist(err) {
+		} else if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	}
+
+	err = os.RemoveAll(ociImagePath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	err = os.RemoveAll(volumeMapPath)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}

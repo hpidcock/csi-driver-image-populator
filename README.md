@@ -55,7 +55,7 @@ spec:
   volumes:
   - name: data
     csi:
-      driver: image.csi.k8s.io
+      driver: image2.csi.k8s.io
       volumeAttributes:
           image: kfox1111/misc:test
 ```

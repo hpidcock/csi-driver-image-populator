@@ -1,15 +1,15 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: csi-imageplugin
+  name: csi-imageplugin2
 spec:
   selector:
     matchLabels:
-      app: csi-imageplugin
+      app: csi-imageplugin2
   template:
     metadata:
       labels:
-        app: csi-imageplugin
+        app: csi-imageplugin2
     spec:
       hostNetwork: true
       containers:
@@ -19,11 +19,11 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["/bin/sh", "-c", "rm -rf /registration/csi-image /registration/csi-image-reg.sock"]
+                command: ["/bin/sh", "-c", "rm -rf /registration/csi-image2 /registration/csi-image2-reg.sock"]
           args:
             - --v=5
             - --csi-address=/csi/csi.sock
-            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi-image/csi.sock
+            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi-image2/csi.sock
           env:
             - name: KUBE_NODE_NAME
               valueFrom:
@@ -37,7 +37,7 @@ spec:
             name: registration-dir
 
         - name: image
-          image: hpidcock/imagepopulatorplugin-test1:2
+          image: hpidcock/imagepopulatorplugin-test2:7
           args:
             - "--v=5"
             - "--endpoint=$(CSI_ENDPOINT)"
@@ -54,14 +54,14 @@ spec:
           volumeMounts:
             - mountPath: /csi
               name: socket-dir
-            - mountPath: /var/run/imager
+            - mountPath: /var/run/imager2
               name: storageroot-dir
             - mountPath: /var/lib/kubelet/pods
               name: mountpoint-dir
 
       volumes:
         - hostPath:
-            path: /var/lib/kubelet/plugins/csi-image
+            path: /var/lib/kubelet/plugins/csi-image2
             type: DirectoryOrCreate
           name: socket-dir
         - hostPath:
@@ -73,7 +73,7 @@ spec:
             type: Directory
           name: registration-dir
         - hostPath:
-            path: /var/run/imager
+            path: /var/run/imager2
             type: DirectoryOrCreate
           name: storageroot-dir
 
