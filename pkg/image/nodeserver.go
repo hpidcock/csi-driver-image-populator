@@ -27,6 +27,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/golang/glog"
 	csicommon "github.com/kubernetes-csi/drivers/pkg/csi-common"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -61,13 +62,17 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	targetPath := req.GetTargetPath()
 	targetPath = strings.TrimPrefix(targetPath, "/var/snap/microk8s/common")
+
+	glog.Infof("os.MkdirAll(%q, 0750)", targetPath)
 	if err := os.MkdirAll(targetPath, 0750); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
+	glog.Infof("os.MkdirAll(%q, 0750)", "/var/lib/kubelet/plugins/csi-juju-image/blobs")
 	if err := os.MkdirAll("/var/lib/kubelet/plugins/csi-juju-image/blobs", 0750); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	glog.Infof("os.MkdirAll(%q, 0750)", "/var/lib/kubelet/plugins/csi-juju-image/volumes")
 	if err := os.MkdirAll("/var/lib/kubelet/plugins/csi-juju-image/volumes", 0750); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -77,26 +82,20 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	image := req.GetVolumeContext()["image"]
 	imageURL := fmt.Sprintf("docker://%s", image)
 
-	// ref, err := reference.Parse(image)
-	// if err != nil {
-	// 	return nil, status.Error(codes.Internal, err.Error())
-	// }
-	// switch typedRef := ref.(type) {
-	// case reference.Digested:
-	// case reference.Tagged:
-	// }
-
 	ociImagePath := fmt.Sprintf("/var/lib/kubelet/plugins/csi-juju-image/volumes/%s", volumeID)
 	ociURL := fmt.Sprintf("oci:%s:img", ociImagePath)
 	args := []string{"copy",
 		"--src-shared-blob-dir", "/var/lib/kubelet/plugins/csi-juju-image/blobs/",
 		"--dest-shared-blob-dir", "/var/lib/kubelet/plugins/csi-juju-image/blobs/",
 		imageURL, ociURL}
-	_, err := ns.runCmd("skopeo", args)
+	glog.Infof("skopeo %s", strings.Join(args, " "))
+	out, err := ns.runCmd("skopeo", args)
 	defer os.RemoveAll(ociImagePath)
 	if err != nil {
+		glog.Infof(string(out))
 		return nil, status.Error(codes.Internal, err.Error())
 	}
+	glog.Infof("os.Symlink(%q, %q)", "/var/lib/kubelet/plugins/csi-juju-image/blobs/sha256", path.Join(ociImagePath, "blobs/sha256"))
 	err = os.Symlink("/var/lib/kubelet/plugins/csi-juju-image/blobs/sha256", path.Join(ociImagePath, "blobs/sha256"))
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
@@ -105,8 +104,10 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	args = []string{"unpack",
 		"--ref", "name=img",
 		ociImagePath, targetPath}
+	glog.Infof("oci-image-tool %s", strings.Join(args, " "))
 	_, err = ns.runCmd("oci-image-tool", args)
 	if err != nil {
+		glog.Infof(string(out))
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -124,6 +125,7 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	targetPath := req.GetTargetPath()
 	targetPath = strings.TrimPrefix(targetPath, "/var/snap/microk8s/common")
 
+	glog.Infof("os.RemoveAll(%q)", targetPath)
 	err := os.RemoveAll(targetPath)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
