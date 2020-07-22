@@ -22,8 +22,8 @@ spec:
                 command: ["/bin/sh", "-c", "rm -rf /registration/csi-image /registration/csi-image-reg.sock"]
           args:
             - --v=5
-            - --csi-address=/csi/csi.sock
-            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi-image/csi.sock
+            - --csi-address=/var/lib/kubelet/plugins/csi-juju-image/csi.sock
+            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi-juju-image/csi.sock
           env:
             - name: KUBE_NODE_NAME
               valueFrom:
@@ -31,8 +31,8 @@ spec:
                   apiVersion: v1
                   fieldPath: spec.nodeName
           volumeMounts:
-          - mountPath: /csi
-            name: socket-dir
+          - mountPath: /var/lib/kubelet/plugins/csi-juju-image
+            name: plugin-dir
           - mountPath: /registration
             name: registration-dir
 
@@ -44,7 +44,7 @@ spec:
             - "--nodeid=$(KUBE_NODE_NAME)"
           env:
             - name: CSI_ENDPOINT
-              value: unix:///csi/csi.sock
+              value: unix:///var/lib/kubelet/plugins/csi-juju-image/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -52,18 +52,16 @@ spec:
                   fieldPath: spec.nodeName
           imagePullPolicy: Always
           volumeMounts:
-            - mountPath: /csi
-              name: socket-dir
-            - mountPath: /var/run/imager
-              name: storageroot-dir
+            - mountPath: /var/lib/kubelet/plugins/csi-juju-image
+              name: plugin-dir
             - mountPath: /var/lib/kubelet/pods
               name: mountpoint-dir
 
       volumes:
         - hostPath:
-            path: /var/lib/kubelet/plugins/csi-image
+            path: /var/lib/kubelet/plugins/csi-juju-image
             type: DirectoryOrCreate
-          name: socket-dir
+          name: plugin-dir
         - hostPath:
             path: /var/lib/kubelet/pods
             type: DirectoryOrCreate
@@ -72,8 +70,3 @@ spec:
             path: /var/lib/kubelet/plugins_registry
             type: Directory
           name: registration-dir
-        - hostPath:
-            path: /var/run/imager
-            type: DirectoryOrCreate
-          name: storageroot-dir
-

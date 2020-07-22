@@ -63,10 +63,10 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	if err := os.MkdirAll("/var/run/imager/blobs", 0750); err != nil {
+	if err := os.MkdirAll("/var/lib/kubelet/plugins/csi-juju-image/blobs", 0750); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	if err := os.MkdirAll("/var/run/imager/volumes", 0750); err != nil {
+	if err := os.MkdirAll("/var/lib/kubelet/plugins/csi-juju-image/volumes", 0750); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
@@ -84,18 +84,18 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	// case reference.Tagged:
 	// }
 
-	ociImagePath := fmt.Sprintf("/var/run/imager/volumes/%s", volumeID)
+	ociImagePath := fmt.Sprintf("/var/lib/kubelet/plugins/csi-juju-image/volumes/%s", volumeID)
 	ociURL := fmt.Sprintf("oci:%s:img", ociImagePath)
 	args := []string{"copy",
-		"--src-shared-blob-dir", "/var/run/imager/blobs/",
-		"--dest-shared-blob-dir", "/var/run/imager/blobs/",
+		"--src-shared-blob-dir", "/var/lib/kubelet/plugins/csi-juju-image/blobs/",
+		"--dest-shared-blob-dir", "/var/lib/kubelet/plugins/csi-juju-image/blobs/",
 		imageURL, ociURL}
 	_, err := ns.runCmd("skopeo", args)
 	defer os.RemoveAll(ociImagePath)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	err = os.Symlink("/var/run/imager/blobs/sha256", path.Join(ociImagePath, "blobs/sha256"))
+	err = os.Symlink("/var/lib/kubelet/plugins/csi-juju-image/blobs/sha256", path.Join(ociImagePath, "blobs/sha256"))
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
