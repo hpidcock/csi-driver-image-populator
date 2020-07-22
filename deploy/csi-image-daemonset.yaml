@@ -37,7 +37,7 @@ spec:
             name: registration-dir
 
         - name: image
-          image: hpidcock/imagepopulatorplugin-test1:2
+          image: gcr.io/hpidcock/csi-driver-image-populator:210932e8c58ccb129384e4458c83479ad51961da
           args:
             - "--v=5"
             - "--endpoint=$(CSI_ENDPOINT)"
