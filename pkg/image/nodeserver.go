@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 	"time"
 
 	"golang.org/x/net/context"
@@ -59,6 +60,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 
 	targetPath := req.GetTargetPath()
+	targetPath = strings.TrimPrefix(targetPath, "/var/snap/microk8s/common")
 	if err := os.MkdirAll(targetPath, 0750); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -120,6 +122,7 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Error(codes.InvalidArgument, "Target path missing in request")
 	}
 	targetPath := req.GetTargetPath()
+	targetPath = strings.TrimPrefix(targetPath, "/var/snap/microk8s/common")
 
 	err := os.RemoveAll(targetPath)
 	if err != nil {
