@@ -65,7 +65,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	isMicroK8s := strings.HasPrefix(targetPath, "/var/snap/microk8s/common")
 	targetPath = strings.TrimPrefix(targetPath, "/var/snap/microk8s/common")
 
-	_, err := os.Stat("/var/snap/microk8s/common/run/containerd.sock")
+	_, err := os.Stat("/host/var/snap/microk8s/common/run/containerd.sock")
 	if os.IsNotExist(err) {
 		isMicroK8s = false
 	} else if err != nil {
@@ -84,6 +84,8 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	ociURL := fmt.Sprintf("oci:%s:img", ociImagePath)
 
 	if isMicroK8s {
+		glog.Infof("using microk8s containerd")
+
 		// docker.io images need to have the docker.io prefix added to them.
 		splitPath := strings.Split(image, "/")
 		if len(splitPath) == 2 {
@@ -91,6 +93,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		}
 		image = strings.Join(splitPath, "/")
 
+		glog.Infof("ioutil.TempDir(%q, %q)", os.TempDir(), "ctr-temp")
 		tempDir, err := ioutil.TempDir(os.TempDir(), "ctr-temp")
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
@@ -99,7 +102,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 		ociTar := path.Join(tempDir, "oci.tar")
 		args := []string{
-			"--address", "/var/snap/microk8s/common/run/containerd.sock",
+			"--address", "/host/var/snap/microk8s/common/run/containerd.sock",
 			"--namespace", "k8s.io",
 			"images", "export",
 			ociTar,
