@@ -56,6 +56,10 @@ spec:
               name: plugin-dir
             - mountPath: /var/lib/kubelet/pods
               name: mountpoint-dir
+            - mountPath: /host/var
+              name: var-dir
+            - mountPath: /host/run
+              name: run-dir
 
       volumes:
         - hostPath:
@@ -70,3 +74,11 @@ spec:
             path: /var/lib/kubelet/plugins_registry
             type: Directory
           name: registration-dir
+        - hostPath:
+            path: /var
+            type: Directory
+          name: var-dir
+        - hostPath:
+            path: /run
+            type: Directory
+          name: run-dir

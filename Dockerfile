@@ -4,6 +4,7 @@ ENV GOPATH /root/go
 
 WORKDIR /root/
 RUN go get -u github.com/opencontainers/image-tools/cmd/oci-image-tool
+RUN go get -u github.com/containerd/containerd/cmd/ctr
 
 WORKDIR /root/driver/
 ADD . .
@@ -24,5 +25,6 @@ RUN \
   rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /root/go/bin/oci-image-tool /usr/local/bin/oci-image-tool
+COPY --from=build /root/go/bin/ctr /usr/local/bin/ctr
 COPY --from=build /root/go/bin/imagepopulatorplugin /usr/local/bin/imagepopulatorplugin
 ENTRYPOINT ["/usr/local/bin/imagepopulatorplugin"]
